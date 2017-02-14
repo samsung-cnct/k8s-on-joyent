@@ -1,10 +1,15 @@
-= Kubernetes on Joyent: The Hard Way
+= Kubernetes on Triton: The Hard Way
 
 
 [[infrastructure]]
 == Cloud Infrastructure Provisioning
 
-This tutorial can be used for running an example HA Kubernetes cluster using the Joyent public cloud.
+The following guest post is based on Kelsey Hightower’s well-regarded link:https://github.com/kelseyhightower/kubernetes-the-hard-way[Kubernetes The Hard Way], published under the Apache 2.0 license in GitHub.
+ 
+This document, like Hightower’s original, is intended to instruct readers on the different components of Kubernetes, how they relate to each other, and how they relate to the host cloud infrastructure. In short, it's one of the best ways to learn how to deploy Kubernetes by hand, prior to engaging in an automation strategy.
+ 
+Read on to learn how to deploy a Kubernetes cluster on Triton in hardware virtual machines.
+This tutorial can be used for running an example HA Kubernetes cluster using the Triton Cloud service.
 
 Begin by creating a link:https://sso.joyent.com/signup[My Joyent] account, and link:https://docs.joyent.com/public-cloud/api-access/cloudapi[installing and configuring the Triton CLI].
 
@@ -12,7 +17,7 @@ _For this tutorial we will be using the us-sw-1 data center_
 
 [[infrastructure-network]]
 === Network
-Create a private Joyent Fabric Network for your kubernetes installation.
+Create a private Joyent Fabric Network for your Kubernetes installation.
 
 image:images/network.png["Network Dialog",width=400,link="images/network.png"]
 
@@ -123,7 +128,7 @@ ssh -o proxycommand="ssh root@$BASTION -W %h:%p" ubuntu@$IP cp /home/ubuntu/.ssh
 You should now have the following compute instances.
 
 ....
-triton ls
+triton instances
 ....
 
 ....
@@ -1240,6 +1245,4 @@ Commercial support is available at
 </html>
 ....
 
-Congratulations. You now have a working cluster built the hard way on Joyent.
-
-_The bulk of this series is Copyrighted by Kelsey Hightower and used under the Apache license. The original text and license can be found on link:https://github.com/kelseyhightower/kubernetes-the-hard-way[Github]_
+Congratulations. You now have a working cluster built the hard way on Triton.
