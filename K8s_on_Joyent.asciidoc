@@ -101,7 +101,7 @@ triton instance create \
  --wait \
  --name=worker1 \
  -N kubernetes \
- -m user-data="hostname=worker0" \
+ -m user-data="hostname=worker1" \
  ubuntu-certified-16.04 k4-highcpu-kvm-1.75G
 ....
 
@@ -110,19 +110,19 @@ triton instance create \
  --wait \
  --name=worker2 \
  -N kubernetes \
- -m user-data="hostname=worker0" \
+ -m user-data="hostname=worker2" \
  ubuntu-certified-16.04 k4-highcpu-kvm-1.75G
 ....
 
 .Allow root login to certified image
 ....
 BASTION=$(triton ip kubernetes)
-IP=$(triton instance list -o 'ips' -j name=worker0 | sed 's/.*ips":."\([0-9.]\+\)".*/\1/')
-ssh -o proxycommand="ssh root@$BASTION -W %h:%p" ubuntu@$IP cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
-IP=$(triton instance list -o 'ips' -j name=worker1 | sed 's/.*ips":."\([0-9.]\+\)".*/\1/')
-ssh -o proxycommand="ssh root@$BASTION -W %h:%p" ubuntu@$IP cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
-IP=$(triton instance list -o 'ips' -j name=worker2 | sed 's/.*ips":."\([0-9.]\+\)".*/\1/')
-ssh -o proxycommand="ssh root@$BASTION -W %h:%p" ubuntu@$IP cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
+IP=$(triton ip worker0)
+ssh -o proxycommand="ssh root@$BASTION -W %h:%p" ubuntu@$IP sudo cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
+IP=$(triton ip worker1)
+ssh -o proxycommand="ssh root@$BASTION -W %h:%p" ubuntu@$IP sudo cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
+IP=$(triton ip worker2)
+ssh -o proxycommand="ssh root@$BASTION -W %h:%p" ubuntu@$IP sudo cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
 ....
 
 You should now have the following compute instances.
@@ -320,10 +320,10 @@ openssl x509 -in kubernetes.pem -text -noout
 
 .Copy the TLS certificates and keys to each Kubernetes host
 ....
-KUBERNETES_HOSTS=(controller0 controller1 controller2 worker0 worker1 worker2)
+IPS=$(triton instance ls -o ips | grep -v IPS | tr '\n' ',' | tr -d '[]')
 BASTION=$(triton ip kubernetes)
 tar cf - ca.pem kubernetes-key.pem kubernetes.pem | 
-  ssh $BASTION tar xf -
+  ssh root@$BASTION tar xf -
 for ip in $(echo $IPS | tr ',"' ' '); do
   tar cf - ca.pem kubernetes-key.pem kubernetes.pem | 
   ssh -o StrictHostKeyChecking=no \
@@ -374,12 +374,6 @@ also be used to limit access to the etcd cluster using TLS client
 authentication. Only clients with a TLS certificate signed by a trusted
 CA will be able to access the etcd cluster.
 
-.Copy the TLS certificates to the etcd configuration directory
-....
-mkdir -p /etc/etcd/
-cp ca.pem kubernetes-key.pem kubernetes.pem /etc/etcd/
-....
-
 [[download-and-install-the-etcd-binaries]]
 ==== Download and Install the etcd binaries
 
@@ -391,7 +385,7 @@ wget https://github.com/coreos/etcd/releases/download/v3.0.10/etcd-v3.0.10-linux
 .Extract and install the `etcd` server binary and the `etcdctl` command line client
 ....
 tar -xvf etcd-v3.0.10-linux-amd64.tar.gz
-mv etcd-v3.0.10-linux-amd64/etcd\* /usr/bin/
+mv etcd-v3.0.10-linux-amd64/etcd* /usr/bin/
 ....
 
 All etcd data is stored under the etcd data directory.
@@ -402,7 +396,7 @@ NOTE: In production the etcd data directory should be backed by a persistent dis
 
 .Copy the TLS certificates to the etcd configuration directory
 ....
-mkdir -p /var/lib/etcd
+mkdir -p /var/lib/etcd /etc/etcd/
 cp ca.pem kubernetes-key.pem kubernetes.pem /etc/etcd/
 ....
 
@@ -611,7 +605,7 @@ Description=Kubernetes API Server
 Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
 [Service]
-ExecStart=/usr/bin/kube-apiserver \
+ExecStart=/usr/local/bin/kube-apiserver \
   --admission-control=NamespaceLifecycle,LimitRanger,SecurityContextDeny,ServiceAccount,ResourceQuota \
   --advertise-address=${INTERNAL_IP} \
   --allow-privileged=true \
@@ -660,7 +654,7 @@ Description=Kubernetes Controller Manager
 Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
 [Service]
-ExecStart=/usr/bin/kube-controller-manager \
+ExecStart=/usr/local/bin/kube-controller-manager \
   --allocate-node-cidrs=true \
   --cluster-cidr=10.200.0.0/16 \
   --cluster-name=kubernetes \
@@ -699,7 +693,7 @@ Description=Kubernetes Scheduler
 Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
 [Service]
-ExecStart=/usr/bin/kube-scheduler \
+ExecStart=/usr/local/bin/kube-scheduler \
   --leader-elect=true \
   --master=http://$INTERNAL_IP:8080 \
   --v=2
