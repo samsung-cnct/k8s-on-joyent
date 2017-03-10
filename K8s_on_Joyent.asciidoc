@@ -518,8 +518,8 @@ Run the following commands on `controller0`, `controller1`, and `controller2`.
 
 .Download and install the Kubernetes controller binaries
 ....
-wget -P /usr/bin/ https://storage.googleapis.com/kubernetes-release/release/v1.5.2/bin/linux/amd64/{kube-apiserver,kube-controller-manager,kube-scheduler,kubectl}
-chmod +x /usr/bin/{kube-apiserver,kube-controller-manager,kube-scheduler,kubectl}
+wget -P /usr/local/bin/ https://storage.googleapis.com/kubernetes-release/release/v1.5.2/bin/linux/amd64/{kube-apiserver,kube-controller-manager,kube-scheduler,kubectl}
+chmod +x /usr/local/bin/{kube-apiserver,kube-controller-manager,kube-scheduler,kubectl}
 ....
 
 [[tls-certificates-1]]
@@ -605,7 +605,7 @@ Description=Kubernetes API Server
 Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
 [Service]
-ExecStart=/usr/bin/kube-apiserver \
+ExecStart=/usr/local/bin/kube-apiserver \
   --admission-control=NamespaceLifecycle,LimitRanger,SecurityContextDeny,ServiceAccount,ResourceQuota \
   --advertise-address=${INTERNAL_IP} \
   --allow-privileged=true \
@@ -654,7 +654,7 @@ Description=Kubernetes Controller Manager
 Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
 [Service]
-ExecStart=/usr/bin/kube-controller-manager \
+ExecStart=/usr/local/bin/kube-controller-manager \
   --allocate-node-cidrs=true \
   --cluster-cidr=10.200.0.0/16 \
   --cluster-name=kubernetes \
@@ -693,7 +693,7 @@ Description=Kubernetes Scheduler
 Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
 [Service]
-ExecStart=/usr/bin/kube-scheduler \
+ExecStart=/usr/local/bin/kube-scheduler \
   --leader-elect=true \
   --master=http://$INTERNAL_IP:8080 \
   --v=2
