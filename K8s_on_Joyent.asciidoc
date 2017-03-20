@@ -876,7 +876,6 @@ After=docker.service
 Requires=docker.service
 
 [Service]
-EnvironmentFile=/etc/dockerenv.conf
 ExecStart=/usr/bin/kubelet \
   --allow-privileged=true \
   --api-servers=${API_SERVERS} \
