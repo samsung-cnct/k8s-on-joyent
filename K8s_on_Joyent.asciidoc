@@ -1098,7 +1098,7 @@ ip link add vxlan0 type vxlan id 1 dstport 0
 eval $(kubectl get nodes \
   --output=jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}' |
   grep -v $INTERNAL_IP |
-  awk '{ print "bridge fdb append to 00:00:00:00:00:00 dst " $1 " via net0" }')
+  xargs -n1 printf "bridge fdb append to 00:00:00:00:00:00 dst %s dev net0;")
 ip addr add $VXLAN_IP dev vxlan0
 ip link set up vxlan0
 ....
@@ -1112,7 +1112,7 @@ NOTE: Do this on each worker:
 eval $(kubectl get nodes \
   --output=jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address} {.spec.podCIDR} {"\n"}{end}' | 
   grep -v $INTERNAL_IP | 
-  awk '{GW=$2;gsub("10.200","172.16",GW); gsub("0/24","1",GW); print "ip route add " $2 " via " GW }')
+  awk '{GW=$2;gsub("10.200","172.16",GW); gsub("0/24","1",GW); printf "ip route add " $2 " via " GW "; "}')
 ....
 
 [[deploying-the-cluster-dns-add-on]]
