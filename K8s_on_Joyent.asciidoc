@@ -1098,7 +1098,7 @@ ip link add vxlan0 type vxlan id 1 dstport 0
 eval $(kubectl get nodes \
   --output=jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}' |
   grep -v $INTERNAL_IP |
-  awk '{ print "bridge fdb append to 00:00:00:00:00:00 dst " $1 " via net0" }')
+  awk '{ print "bridge fdb append to 00:00:00:00:00:00 dst " $1 " dev net0" }')
 ip addr add $VXLAN_IP dev vxlan0
 ip link set up vxlan0
 ....
