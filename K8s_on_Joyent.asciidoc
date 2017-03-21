@@ -1198,16 +1198,15 @@ service "nginx" exposed
 NODE_PORT=$(kubectl get svc nginx --output=jsonpath='{range .spec.ports[0]}{.nodePort}')
 ....
 
-.Grab the EXTERNAL_IP for one of the worker nodes
+.Grab the ip for one of the worker nodes
 ....
-NODE_PUBLIC_IP=$(aws ec2 describe-instances \
-  --filters "Name=tag:Name,Values=worker0" | \
-  jq -j '.Reservations[].Instances[].PublicIpAddress')
+BASTION=$(triton ip kubernetes)
+IP=$(triton ip worker0)
 ....
 
-.Test the nginx service using cURL
+.Test the nginx service using cURL from the Bastion host
 ....
-curl http://${NODE_PUBLIC_IP}:${NODE_PORT}
+ssh root@$BASTION curl http://${IP}:${NODE_PORT}
 ....
 
 ....
