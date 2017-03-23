@@ -53,7 +53,7 @@ triton instance create \
  --name=kubernetes \
  -N Joyent-SDC-Public,kubernetes \
  -m user-data="hostname=kubernetes" \
- ubuntu-16.04 g4-highcpu-1G
+ ubuntu-certified-16.04 k4-highcpu-kvm-1.75G
 ....
 
 [[controllers]]
@@ -64,7 +64,7 @@ triton instance create \
  --name=controller0 \
  -N kubernetes \
  -m user-data="hostname=controller0" \
- ubuntu-16.04 g4-highcpu-1G
+ ubuntu-certified-16.04 k4-highcpu-kvm-1.75G
 ....
 
 ....
@@ -73,7 +73,7 @@ triton instance create \
  --name=controller1 \
  -N kubernetes \
  -m user-data="hostname=controller1" \
- ubuntu-16.04 g4-highcpu-1G
+ ubuntu-certified-16.04 k4-highcpu-kvm-1.75G
 ....
 
 ....
@@ -82,7 +82,7 @@ triton instance create \
  --name=controller2 \
  -N kubernetes \
  -m user-data="hostname=controller2" \
- ubuntu-16.04 g4-highcpu-1G
+ ubuntu-certified-16.04 k4-highcpu-kvm-1.75G
 ....
 
 [[worker-agents]]
@@ -117,13 +117,14 @@ triton instance create \
 .Allow root login to certified image
 ....
 BASTION=$(triton ip kubernetes)
-IP=$(triton ip worker0)
-ssh -o proxycommand="ssh root@$BASTION -W %h:%p" ubuntu@$IP sudo cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
-IP=$(triton ip worker1)
-ssh -o proxycommand="ssh root@$BASTION -W %h:%p" ubuntu@$IP sudo cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
-IP=$(triton ip worker2)
-ssh -o proxycommand="ssh root@$BASTION -W %h:%p" ubuntu@$IP sudo cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
+ssh ubuntu@$BASTION sudo cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
+for d in controller{0,1,2} worker{0,1,2}; do
+    IP=$(triton ip $d)
+    proxyssh ubuntu@$IP sudo cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
+done
 ....
+
+NOTE: This is not something you should normally do. This is to simplify this document only.
 
 You should now have the following compute instances.
 
