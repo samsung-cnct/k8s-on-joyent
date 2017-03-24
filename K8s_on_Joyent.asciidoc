@@ -114,9 +114,20 @@ triton instance create \
  ubuntu-certified-16.04 k4-highcpu-kvm-1.75G
 ....
 
+.Set up some environment for this tutorial
+....
+BASTION=""
+# Define a bash function to keep the typing to a minimum
+proxyssh() {
+  BASTION=${BASTION:=$(triton ip kubernetes)}
+  ssh -o proxycommand="ssh root@$BASTION -W %h:%p" $SSH_PROXY $@
+}
+....
+
+Ubuntu normally prevents you from logging in as root. For the sake of brevity in this document, override this behavior.
+
 .Allow root login to certified image
 ....
-BASTION=$(triton ip kubernetes)
 ssh ubuntu@$BASTION sudo cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
 for d in controller{0,1,2} worker{0,1,2}; do
     IP=$(triton ip $d)
@@ -126,6 +137,7 @@ done
 
 NOTE: This is not something you should normally do. This is to simplify this document only.
 
+
 You should now have the following compute instances.
 
 ....
@@ -134,10 +146,10 @@ triton instances
 
 ....
 SHORTID   NAME         IMG                              STATE    FLAGS  AGE
-e2a3b8a6  kubernetes   ubuntu-16.04@20161213            running  -      1d
-b080b2c4  controller0  ubuntu-16.04@20161213            running  -      1d
-846d3bb7  controller1  ubuntu-16.04@20161213            running  -      1d
-e3226afb  controller2  ubuntu-16.04@20161213            running  -      1d
+e2a3b8a6  kubernetes   ubuntu-certified-16.04@20161221  running  K      1d
+b080b2c4  controller0  ubuntu-certified-16.04@20161221  running  K      1d
+846d3bb7  controller1  ubuntu-certified-16.04@20161221  running  K      1d
+e3226afb  controller2  ubuntu-certified-16.04@20161221  running  K      1d
 753c5f0c  worker0      ubuntu-certified-16.04@20161221  running  K      1d
 7bb2a272  worker1      ubuntu-certified-16.04@20161221  running  K      1d
 c34597cf  worker2      ubuntu-certified-16.04@20161221  running  K      1d
@@ -262,7 +274,7 @@ This is being done for ease of use. In production you should generate
 individual TLS certificates for each component type. All replicas of a given 
 component type must share the same certificate.
 
-.Set the Kubernetes Public Address
+.Set the Kubernetes "Public" Address
 ....
 IPS=$(triton instance ls -o ips | grep -v IPS | tr '\n' ',' | tr -d '[]')
 ....
@@ -321,8 +333,11 @@ openssl x509 -in kubernetes.pem -text -noout
 
 .Copy the TLS certificates and keys to each Kubernetes host
 ....
+# Collect a list of all the ips
 IPS=$(triton instance ls -o ips | grep -v IPS | tr '\n' ',' | tr -d '[]')
+# Use this machine to access the hosts that are all on a private network
 BASTION=$(triton ip kubernetes)
+# Copy the certificates to all the hosts
 tar cf - ca.pem kubernetes-key.pem kubernetes.pem | 
   ssh root@$BASTION tar xf -
 for ip in $(echo $IPS | tr ',"' ' '); do
@@ -362,7 +377,7 @@ required by etcd.
 [[provision-the-etcd-cluster]]
 === Provision the etcd Cluster
 
-Run the following commands on `controller0`, `controller1`, and `controller2`:
+Run the following commands for each of `controller0`, `controller1`, and `controller2`:
 
 [[tls-certificates]]
 ==== TLS Certificates
@@ -380,13 +395,20 @@ CA will be able to access the etcd cluster.
 
 .Download the official etcd release binaries from `coreos/etcd` GitHub project
 ....
-wget https://github.com/coreos/etcd/releases/download/v3.0.10/etcd-v3.0.10-linux-amd64.tar.gz
+# Set NODENAME for each controller node in turn as your repeat this section
+NODENAME=controller0
+# Get the address of that controller
+IP=$(triton ip ${NODENAME})
+# Download the ETCD binaries
+proxyssh root@$IP wget --no-verbose https://github.com/coreos/etcd/releases/download/v3.0.10/etcd-v3.0.10-linux-amd64.tar.gz
 ....
 
 .Extract and install the `etcd` server binary and the `etcdctl` command line client
 ....
+proxyssh root@$IP <<< '
 tar -xvf etcd-v3.0.10-linux-amd64.tar.gz
 mv etcd-v3.0.10-linux-amd64/etcd* /usr/bin/
+'
 ....
 
 All etcd data is stored under the etcd data directory.
@@ -397,48 +419,47 @@ NOTE: In production the etcd data directory should be backed by a persistent dis
 
 .Copy the TLS certificates to the etcd configuration directory
 ....
+proxyssh root@$IP <<< '
 mkdir -p /var/lib/etcd /etc/etcd/
 cp ca.pem kubernetes-key.pem kubernetes.pem /etc/etcd/
+'
 ....
 
 The internal IP address will be used by etcd to serve client requests
 and communicate with other etcd peers.
 
-.Set The Internal IP Address
-....
-INTERNAL_IP=$(ip addr show net0 | awk '/inet /{gsub(/\/[0-9][0-9]/,"");print $2}')
-....
-
-.Each etcd member must have a unique name within an etcd cluster
-....
-ETCD_NAME=$(mdata-get user-data | sed 's/.*hostname=\([^ ]*\).*$/\1/')
-....
+NOTE: Each etcd member must have a unique name within an etcd cluster
 
 .Set the controller addresses
 ....
-INITIAL_CLUSTER=$(triton instance ls -o name,ips | awk '/controller/{gsub(/[^0-9.]/,"",$2);print $1 "=https://" $2":2380"}' | tr '\n' ',')
+# Retrieve all the names and addresses from triton,
+# filter for just the controllers, then build URLs
+# for each of them.
+INITIAL_CLUSTER=$(triton instance ls -o name,ips | 
+  awk '/controller/{gsub(/[^0-9.]/,"",$2);print $1 "=https://" $2":2380"}' | 
+  tr '\n' ',')
 ....
 
 The etcd server will be started and managed by systemd. 
 
 .Create the etcd systemd service file
 ....
-echo "[Unit]
+proxyssh root@$IP cp /dev/stdin /etc/systemd/system/etcd.service <<< "[Unit]
 Description=etcd
 Documentation=https://github.com/coreos
 
 [Service]
-ExecStart=/usr/bin/etcd --name $ETCD_NAME \
+ExecStart=/usr/bin/etcd --name $NODENAME \
   --cert-file=/etc/etcd/kubernetes.pem \
   --key-file=/etc/etcd/kubernetes-key.pem \
   --peer-cert-file=/etc/etcd/kubernetes.pem \
   --peer-key-file=/etc/etcd/kubernetes-key.pem \
   --trusted-ca-file=/etc/etcd/ca.pem \
   --peer-trusted-ca-file=/etc/etcd/ca.pem \
-  --initial-advertise-peer-urls https://$INTERNAL_IP:2380 \
-  --listen-peer-urls https://$INTERNAL_IP:2380 \
-  --listen-client-urls https://$INTERNAL_IP:2379,http://127.0.0.1:2379 \
-  --advertise-client-urls https://$INTERNAL_IP:2379 \
+  --initial-advertise-peer-urls https://$IP:2380 \
+  --listen-peer-urls https://$IP:2380 \
+  --listen-client-urls https://$IP:2379,http://127.0.0.1:2379 \
+  --advertise-client-urls https://$IP:2379 \
   --initial-cluster-token etcd-cluster-0 \
   --initial-cluster $INITIAL_CLUSTER \
   --initial-cluster-state new \
@@ -448,22 +469,24 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-" > /etc/systemd/system/etcd.service
+"
 ....
 
 .Enable and start etcd
 ....
+proxyssh root@$IP <<< "
 systemctl daemon-reload
 systemctl enable etcd
 systemctl start etcd
+"
 ....
 
 .Verification
 ....
-systemctl status etcd --no-pager
+proxyssh root@$IP systemctl status etcd --no-pager
 ....
 
-NOTE: Remember to run these steps on `controller0`, `controller1`, and `controller2`
+NOTE: Remember to repeat these steps for `controller1`, and `controller2`
 
 ==== Verification
 
@@ -472,7 +495,7 @@ healthy, on one of the controller nodes run:
 
 .Request etcd cluster health
 ....
-etcdctl --ca-file=/etc/etcd/ca.pem cluster-health
+proxyssh root@$IP etcdctl --ca-file=/etc/etcd/ca.pem cluster-health
 ....
 
 ....
@@ -515,12 +538,20 @@ elect a leader via the API Server.
 [[provision-the-kubernetes-controller-cluster]]
 === Provision the Kubernetes Controller Cluster
 
-Run the following commands on `controller0`, `controller1`, and `controller2`.
+Run the following commands for each of `controller0`, `controller1`, and `controller2`.
+
+.Set some variables for this section
+....
+NODENAME=controller0
+IP=$(triton ip $NODENAME)
+....
 
 .Download and install the Kubernetes controller binaries
 ....
-wget -P /usr/local/bin/ https://storage.googleapis.com/kubernetes-release/release/v1.5.2/bin/linux/amd64/{kube-apiserver,kube-controller-manager,kube-scheduler,kubectl}
+proxyssh root@$IP <<< "
+wget --no-verbose -P /usr/local/bin/ https://storage.googleapis.com/kubernetes-release/release/v1.5.2/bin/linux/amd64/{kube-apiserver,kube-controller-manager,kube-scheduler,kubectl}
 chmod +x /usr/local/bin/{kube-apiserver,kube-controller-manager,kube-scheduler,kubectl}
+"
 ....
 
 [[tls-certificates-1]]
@@ -536,10 +567,11 @@ the Kubernetes API server to etcd via TLC client auth.
 
 .Copy the TLS certificates to the Kubernetes configuration directory
 ....
+proxyssh root@$IP <<< "
 mkdir -p /var/lib/kubernetes
 cp ca.pem kubernetes-key.pem kubernetes.pem /var/lib/kubernetes/
+"
 ....
-
 
 [[setup-authentication-and-authorization]]
 === Setup Authentication and Authorization
@@ -560,55 +592,56 @@ which does not require authentication. The insecure port is only enabled
 for local access.
 
 [[common-token]]
-.Create a token file
+.Create a the common token to be used throughout the rest of this tutorial
 ....
-COMMON_TOKEN=$(head /dev/urandom | base32 | head -c 8)
-echo "${COMMON_TOKEN},admin,admin
-${COMMON_TOKEN},scheduler,scheduler
-${COMMON_TOKEN},kubelet,kubelet
-" > /var/lib/kubernetes/token.csv
+COMMON_TOKEN=${COMMON_TOKEN:=$(head /dev/urandom | base32 | head -c 8)}
 echo "Your common token is: ${COMMON_TOKEN}"
 ....
 
-Make a note of your common token for later.
-
+.Create the token file
+....
+proxyssh root@$IP cp /dev/stdin /var/lib/kubernetes/token.csv <<< \
+"${COMMON_TOKEN},admin,admin
+${COMMON_TOKEN},scheduler,scheduler
+${COMMON_TOKEN},kubelet,kubelet
+"
+....
 
 [[authorization]]
 ==== Authorization
 
 Attribute-Based Access Control (ABAC) will be used to authorize access
-to the Kubernetes API. In this lab ABAC will be setup using the
-Kubernetes policy file backend as documented in the
-http://kubernetes.io/docs/admin/authorization[Kubernetes authorization
-guide].
+to the Kubernetes API for this tutorial. Kubernetes policy file backend 
+is documented in the http://kubernetes.io/docs/admin/authorization[Kubernetes 
+authorization guide].
 
 .Create the authorization policy file:
 ....
-cat << EOF > /var/lib/kubernetes/authorization-policy.jsonl
-{"apiVersion": "abac.authorization.kubernetes.io/v1beta1", "kind": "Policy", "spec": {"user":"*", "nonResourcePath": "*", "readonly": true}}
+proxyssh root@$IP cp /dev/stdin /var/lib/kubernetes/authorization-policy.jsonl <<< \
+'{"apiVersion": "abac.authorization.kubernetes.io/v1beta1", "kind": "Policy", "spec": {"user":"*", "nonResourcePath": "*", "readonly": true}}
 {"apiVersion": "abac.authorization.kubernetes.io/v1beta1", "kind": "Policy", "spec": {"user":"admin", "namespace": "*", "resource": "*", "apiGroup": "*"}}
 {"apiVersion": "abac.authorization.kubernetes.io/v1beta1", "kind": "Policy", "spec": {"user":"scheduler", "namespace": "*", "resource": "*", "apiGroup": "*"}}
 {"apiVersion": "abac.authorization.kubernetes.io/v1beta1", "kind": "Policy", "spec": {"user":"kubelet", "namespace": "*", "resource": "*", "apiGroup": "*"}}
 {"apiVersion": "abac.authorization.kubernetes.io/v1beta1", "kind": "Policy", "spec": {"group":"system:serviceaccounts", "namespace": "*", "resource": "*", "apiGroup": "*", "nonResourcePath": "*"}}
-EOF
+'
 ....
 
 [[kubernetes-api-server]]
 === Kubernetes API Server
 
 .Create the systemd service file
-
 ....
-INTERNAL_IP=$(ip addr show net0 | awk '/inet /{gsub(/\/[0-9][0-9]/,"");print $2}')
-ETCD_SERVERS=$(triton instance ls -o name,ips | awk '/controller/{gsub(/[^0-9.]/,"",$2);print "https://" $2":2379"}' | tr '\n' ',')
-echo "[Unit]
+ETCD_CLIENT_ACCESS=$(triton instance ls -o name,ips | awk '/controller/{gsub(/[^0-9.]/,"",$2);print "https://" $2":2379"}' | tr '\n' ',')
+
+proxyssh root@$IP cp /dev/stdin /etc/systemd/system/kube-apiserver.service <<< \
+"[Unit]
 Description=Kubernetes API Server
 Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
 [Service]
 ExecStart=/usr/local/bin/kube-apiserver \
   --admission-control=NamespaceLifecycle,LimitRanger,SecurityContextDeny,ServiceAccount,ResourceQuota \
-  --advertise-address=${INTERNAL_IP} \
+  --advertise-address=${IP} \
   --allow-privileged=true \
   --apiserver-count=3 \
   --authorization-mode=ABAC \
@@ -618,7 +651,7 @@ ExecStart=/usr/local/bin/kube-apiserver \
   --etcd-cafile=/var/lib/kubernetes/ca.pem \
   --insecure-bind-address=0.0.0.0 \
   --kubelet-certificate-authority=/var/lib/kubernetes/ca.pem \
-  --etcd-servers=${ETCD_SERVERS} \
+  --etcd-servers=${ETCD_CLIENT_ACCESS} \
   --service-account-key-file=/var/lib/kubernetes/kubernetes-key.pem \
   --service-cluster-ip-range=10.32.0.0/24 \
   --service-node-port-range=30000-32767 \
@@ -631,26 +664,29 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-" > /etc/systemd/system/kube-apiserver.service
+"
 ....
 
 .Enable and start api server
 ....
+proxyssh root@$IP <<< "
 systemctl daemon-reload
 systemctl enable kube-apiserver
 systemctl start kube-apiserver
+"
 ....
 
 .Verification
 ....
-systemctl status kube-apiserver --no-pager
+proxyssh root@$IP systemctl status kube-apiserver --no-pager
 ....
 
 [[kubernetes-controller-manager]]
 === Kubernetes Controller Manager
 
 ....
-echo "[Unit]
+proxyssh root@$IP cp /dev/stdin /etc/systemd/system/kube-controller-manager.service <<< \
+"[Unit]
 Description=Kubernetes Controller Manager
 Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
@@ -660,7 +696,7 @@ ExecStart=/usr/local/bin/kube-controller-manager \
   --cluster-cidr=10.200.0.0/16 \
   --cluster-name=kubernetes \
   --leader-elect=true \
-  --master=http://$INTERNAL_IP:8080 \
+  --master=http://$IP:8080 \
   --root-ca-file=/var/lib/kubernetes/ca.pem \
   --service-account-private-key-file=/var/lib/kubernetes/kubernetes-key.pem \
   --service-cluster-ip-range=10.32.0.0/24 \
@@ -670,59 +706,66 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-" > /etc/systemd/system/kube-controller-manager.service
+"
 ....
 
 .Enable and start controller manager
 ....
+proxyssh root@$IP <<< "
 systemctl daemon-reload
 systemctl enable kube-controller-manager
 systemctl start kube-controller-manager
+"
 ....
 
 .Verification
 ....
-systemctl status kube-controller-manager --no-pager
+proxyssh root@$IP systemctl status kube-controller-manager --no-pager
 ....
 
 [[kubernetes-scheduler]]
 === Kubernetes Scheduler
 
 ....
-echo "[Unit]
+proxyssh root@$IP cp /dev/stdin /etc/systemd/system/kube-scheduler.service <<< \
+"[Unit]
 Description=Kubernetes Scheduler
 Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
 [Service]
 ExecStart=/usr/local/bin/kube-scheduler \
   --leader-elect=true \
-  --master=http://$INTERNAL_IP:8080 \
+  --master=http://$IP:8080 \
   --v=2
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-" > /etc/systemd/system/kube-scheduler.service
+"
 ....
 
 .Enable and start scheduler
 ....
+proxyssh root@$IP <<< "
 systemctl daemon-reload
 systemctl enable kube-scheduler
 systemctl start kube-scheduler
+"
 ....
 
 .Verification
 ....
-systemctl status kube-scheduler --no-pager
+proxyssh root@$IP systemctl status kube-scheduler --no-pager
 ....
+
+NOTE: Remember to run these steps for `controller0`, `controller1`, and `controller2`
 
 [[verification-4]]
 === Verification
 
 ....
-kubectl get componentstatuses
+proxyssh root@$IP kubectl get componentstatuses
 ....
 
 ....
@@ -733,8 +776,6 @@ etcd-1               Healthy   {"health": "true"}
 etcd-0               Healthy   {"health": "true"}   
 etcd-2               Healthy   {"health": "true"}  
 ....
-
-NOTE: Remember to run these steps on `controller0`, `controller1`, and `controller2`
 
 [[setup-kubernetes-api-server-frontend-load-balancer]]
 === Setup Kubernetes API Server Frontend Load Balancer
@@ -770,14 +811,22 @@ Some people would like to run workers and cluster services anywhere in
 the cluster. This is totally possible, and you'll have to decide what's
 best for your environment.
 
-Run the following commands on `worker0`, `worker1`, `worker2`:
+Run the following commands for each of `worker0`, `worker1`, and `worker2`:
+
+.Set tutorial section variables
+....
+NODENAME=worker0
+IP=$(triton ip $NODENAME)
+....
 
 [[move-the-tls-certificates-in-place]]
 === Move the TLS certificates in place
 
 ....
+proxyssh root@$IP <<< "
 mkdir -p /var/lib/kubernetes
 cp ca.pem kubernetes-key.pem kubernetes.pem /var/lib/kubernetes/
+"
 ....
 
 [[docker]]
@@ -787,14 +836,17 @@ Kubernetes should be compatible with the Docker 1.9.x - 1.12.x:
 
 .Download and install docker
 ....
-wget https://get.docker.com/builds/Linux/x86_64/docker-1.12.1.tgz
+proxyssh root@$IP <<< "
+wget --no-verbose https://get.docker.com/builds/Linux/x86_64/docker-1.12.1.tgz
 tar -xvf docker-1.12.1.tgz
 cp docker/docker* /usr/bin/
+"
 ....
 
 .Create the Docker systemd service file:
 ....
-sh -c 'echo "[Unit]
+proxyssh root@$IP cp /dev/stdin /etc/systemd/system/docker.service <<< \
+"[Unit]
 Description=Docker Application Container Engine
 Documentation=http://docs.docker.io
 
@@ -809,19 +861,21 @@ Restart=on-failure
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target" > /etc/systemd/system/docker.service'
+WantedBy=multi-user.target"
 ....
 
 .Enable and start docker
 ....
+proxyssh root@$IP <<< "
 systemctl daemon-reload
 systemctl enable docker
 systemctl start docker
+"
 ....
 
-.Verification
+.Verification (this may take a moment for docker to be listening after being started)
 ....
-docker version
+proxyssh root@$IP docker version
 ....
 
 [[kubelet]]
@@ -830,26 +884,29 @@ docker version
 .Download and install CNI plugins
 ....
 mkdir -p /opt/cni
-wget https://storage.googleapis.com/kubernetes-release/network-plugins/cni-07a8a28637e97b22eb8dfe710eeae1344f69d16e.tar.gz
+wget --no-verbose https://storage.googleapis.com/kubernetes-release/network-plugins/cni-07a8a28637e97b22eb8dfe710eeae1344f69d16e.tar.gz
 tar -xvf cni-07a8a28637e97b22eb8dfe710eeae1344f69d16e.tar.gz -C /opt/cni
 ....
 
 .Download and install the Kubernetes worker binaries:
 
 ....
-wget -P /usr/bin https://storage.googleapis.com/kubernetes-release/release/v1.5.2/bin/linux/amd64/{kubectl,kube-proxy,kubelet}
+proxyssh root@$IP <<< "
+wget --no-verbose -P /usr/bin https://storage.googleapis.com/kubernetes-release/release/v1.5.2/bin/linux/amd64/{kubectl,kube-proxy,kubelet}
 chmod +x /usr/bin/{kubectl,kube-proxy,kubelet}
+"
 ....
 
 Set `COMMON_TOKEN` to the value you saved in xref:common-token[Authentication]
 
 ==== Configure kubelet:
 ....
-CONTROLLER0=$(triton instance ls -o name,ips | awk '/controller0/{gsub(/[^0-9.]/,"",$2);print "https://" $2 ":6443"}')
+CONTROLLER0=$(triton ip controller0 | xargs printf 'https://%s:6443')
 API_SERVERS=$(triton instance ls -o name,ips | awk '/controller/{gsub(/[^0-9.]/,"",$2);print "https://" $2":6443"}' | tr '\n' ',')
 
-mkdir -p /var/lib/kubelet/
-echo "apiVersion: v1
+proxyssh root@$IP mkdir -p /var/lib/kubelet/
+proxyssh root@$IP cp /dev/stdin /var/lib/kubelet/kubeconfig <<< \
+"apiVersion: v1
 kind: Config
 clusters:
 - cluster:
@@ -865,12 +922,13 @@ current-context: kubelet
 users:
 - name: kubelet
   user:
-    token: $COMMON_TOKEN" > /var/lib/kubelet/kubeconfig
+    token: $COMMON_TOKEN"
 ....
 
 .Create the kubelet systemd service file
 ....
-sh -c 'echo "[Unit]
+proxyssh root@$IP cp /dev/stdin /etc/systemd/system/kubelet.service <<< \
+"[Unit]
 Description=Kubernetes Kubelet
 Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 After=docker.service
@@ -895,19 +953,21 @@ Restart=on-failure
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target" > /etc/systemd/system/kubelet.service'
+WantedBy=multi-user.target"
 ....
 
 .Enable and start kubelet
 ....
+proxyssh root@$IP <<< "
 systemctl daemon-reload
 systemctl enable kubelet
 systemctl start kubelet
+"
 ....
 
 .Verification
 ....
-systemctl status kubelet --no-pager
+proxyssh root@$IP systemctl status kubelet --no-pager
 ....
 
 [[kube-proxy]]
@@ -915,7 +975,8 @@ systemctl status kubelet --no-pager
 
 .Create the kube-proxy service file
 ....
-echo "[Unit]
+proxyssh root@$IP cp /dev/stdin /etc/systemd/system/kube-proxy.service <<< \
+"[Unit]
 Description=Kubernetes Kube Proxy
 Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
@@ -930,19 +991,21 @@ Restart=on-failure
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target" > /etc/systemd/system/kube-proxy.service
+WantedBy=multi-user.target"
 ....
 
 .Enable and start kube-proxy
 ....
+proxyssh root@$IP <<< "
 systemctl daemon-reload
 systemctl enable kube-proxy
 systemctl start kube-proxy
+"
 ....
 
 .Verification
 ....
-systemctl status kube-proxy --no-pager
+proxyssh root@$IP systemctl status kube-proxy --no-pager
 ....
 
 NOTE: Remember to run these steps on all workers.
@@ -952,37 +1015,37 @@ NOTE: Remember to run these steps on all workers.
 [[download-and-install-kubectl]]
 === Download and Install kubectl
 
-.OS X
-....
-wget -P /usr/local/bin/ https://storage.googleapis.com/kubernetes-release/release/v1.5.2/bin/darwin/amd64/kubectl
-chmod +x /usr/local/bin/kubectl
-....
+We're going to do all of this configuration to our bastion. Without a load balancer on a public ip address, there's no way to
+access our cluster from outside.
 
-.Linux
+.Install kubectl
 ....
-wget -P /usr/local/bin/ https://storage.googleapis.com/kubernetes-release/release/v1.5.2/bin/linux/amd64/kubectl
+ssh root@$BASTION <<< "
+wget --no-verbose -P /usr/local/bin/ https://storage.googleapis.com/kubernetes-release/release/v1.5.2/bin/linux/amd64/kubectl
 chmod +x /usr/local/bin/kubectl
+"
 ....
 
 [[configure-kubectl]]
 === Configure Kubectl
 
-Configure the kubectl client to point to the
+If you had a xref:setup-kubernetes-api-server-frontend-load-balancer[Load Balancer] you would configure kubectl to use that address.
+Since you don't, we'll do this all from the bastion and point it at a controller.
+....
+KUBERNETES_PUBLIC_ADDRESS=$(triton ip controller0)
+....
 
-xref:setup-kubernetes-api-server-frontend-load-balancer[Load Balancer] (if 
-configured) or do this from the bastion and configure it to point to a 
-controller. Set KUBERNETES_PUBLIC_ADDRESS to the IP address of the desired
-endpoint.
+Recall the xref:common-token[common token] we set up. The environment variable should still have that stored.
 
-Recall the xref:common-token[common token] we set up.
+If you were not going to be using the bastion and were instead using your proxy server, you would need to copy your CA from
+xref:setting-up-a-certificate-authority-and-tls-cert-generation[Setting up a CA and TLS Cert Generation] to the host with kubectl.
+Since we are using self-signed TLS certs we need to trust the CA certificate so we can verify the remote API Servers.
 
-Also be sure to locate the CA certificate from 
-xref:setting-up-a-certificate-authority-and-tls-cert-generation[Setting up a CA and TLS Cert Generation].
-Since we are using self-signed TLS certs we need to trust the CA certificate so we can
-verify the remote API Servers.
+The CA certificate has been copied to the bastion in an earlier step.
 
 .Build up the kubeconfig entry
 ....
+ssh root@$BASTION <<< "
 kubectl config set-cluster kubernetes-the-hard-way \
   --certificate-authority=ca.pem \
   --embed-certs=true \
@@ -995,13 +1058,14 @@ kubectl config set-context default-context \
   --user=admin
 
 kubectl config use-context default-context
+"
 ....
 
 At this point you should be able to connect securly to the remote API
 server.
 
 ....
-kubectl get componentstatuses
+ssh root@$BASTION kubectl get componentstatuses
 ....
 
 ....
@@ -1014,7 +1078,7 @@ etcd-1               Healthy   {"health": "true"}
 ....
 
 ....
-kubectl get nodes
+ssh root@$BASTION kubectl get nodes
 ....
 
 ....
@@ -1030,10 +1094,6 @@ e8e8402e-3326-4d66-b3db-d62e588ac347   Ready     2m
 Now that each worker node is online we need to add an overlay network
 and routes to make sure that Pods running on different machines can talk
 to each other.
-
-These instructions require kubectl on the workers. Please follow
-xref:download-and-install-kubectl[these instructions] to install kubectl on each
-worker.
 
 [[container-subnets]]
 === Container Subnets
@@ -1083,38 +1143,42 @@ Output:
 [[create-an-overlay-network]]
 ==== Create an overlay network
 
-Fabric Networks do not forward multicasting so we need to creae a unicast vxlan
-overlay. We will create it in such a way that it logically matches the
-podCIDR network.
+Triton fabric networks do not forward multicasting so we need to creae a unicast vxlan
+overlay.
 
-NOTE: Do this on each worker:
+NOTE: Do this for each worker: worker0, worker1, and worker2
 
 ....
-INTERNAL_IP=$(ip addr show net0 | awk '/inet /{gsub(/\/[0-9][0-9]/,"");print $2}')
-VXLAN_IP=$(kubectl get nodes \
-  --output=jsonpath='{range .items[*]} {.status.addresses[?(@.type=="InternalIP")].address} {.spec.podCIDR} {"\n"}{end}' | 
-  awk "/$INTERNAL_IP/{print \$2}" | 
-  sed -e 's/10\.200\./172.16./' -e 's@0/@1/@')
+IP=$(triton ip worker0)
+# set the VXLAN_CIDR to 172.16.0.N where N is the last quad of IP
+VXLAN_CIDR=172.16.0.${IP##*.}/24
+# Get the ouput of the kubectl command shown above in "Populate the Routing Table"
+GETNODES=$(ssh root@$BASTION "kubectl get nodes --output=jsonpath='{range .items[*]} {.status.addresses[?(@.type==\"InternalIP\")].address} {.spec.podCIDR}{\"\\n\"}{end}'")
+# Get the vxlan destination addresses from the kubectl output (every other worker IP)
+VXLAN_D=$(awk '!/'$IP'/{print $1}' <<< "$GETNODES")
+# create the unicast vxlan endpoint FDB table entries
+BRIDGE_COMMANDS=$(xargs printf "bridge fdb append to 00:00:00:00:00:00 dev vxlan0 dst %s\n" <<< $VXLAN_D)
+echo $BRIDGE_COMMANDS
+
+proxyssh root@$IP <<< "
 ip link add vxlan0 type vxlan id 1 dstport 0
-eval $(kubectl get nodes \
-  --output=jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}' |
-  grep -v $INTERNAL_IP |
-  xargs -n1 printf "bridge fdb append to 00:00:00:00:00:00 dst %s dev net0;")
-ip addr add $VXLAN_IP dev vxlan0
+$BRIDGE_COMMANDS
+ip addr add $VXLAN_CIDR dev vxlan0
 ip link set up vxlan0
+"
 ....
 
 [[create-routes]]
 ==== Create Routes
 
-NOTE: Do this on each worker:
+....
+# create the L3 route commands to forward pod traffic over the vxlan
+ROUTES=$(awk '!/'$IP'/{GW=$1;gsub("10.240","172.16",GW);print "ip route add "$2" via "GW}' <<< "$GETNODES")
+echo $ROUTES
+proxyssh root@$IP <<< "$ROUTES"
+....
 
-....
-eval $(kubectl get nodes \
-  --output=jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address} {.spec.podCIDR} {"\n"}{end}' | 
-  grep -v $INTERNAL_IP | 
-  awk '{GW=$2;gsub("10.200","172.16",GW); gsub("0/24","1",GW); printf "ip route add " $2 " via " GW "; "}')
-....
+NOTE: Remember to create the overlan network and routes on all workers.
 
 [[deploying-the-cluster-dns-add-on]]
 == Deploying the Cluster DNS Add-on
@@ -1130,12 +1194,12 @@ the DNS add-on the following things will not work:
 
 .Create the `kubedns` service:
 ....
-kubectl create -f https://raw.githubusercontent.com/kelseyhightower/kubernetes-the-hard-way/master/services/kubedns.yaml
+ssh root@$BASTION kubectl create -f https://raw.githubusercontent.com/kelseyhightower/kubernetes-the-hard-way/master/services/kubedns.yaml
 ....
 
 .Verification
 ....
-kubectl --namespace=kube-system get svc
+ssh root@$BASTION kubectl --namespace=kube-system get svc
 ....
 
 ....
@@ -1145,12 +1209,12 @@ kube-dns   10.32.0.10   <none>        53/UDP,53/TCP   5s
 
 .Create the `kubedns` deployment:
 ....
-kubectl create -f https://raw.githubusercontent.com/kelseyhightower/kubernetes-the-hard-way/master/deployments/kubedns.yaml
+ssh root@$BASTION kubectl create -f https://raw.githubusercontent.com/kelseyhightower/kubernetes-the-hard-way/master/deployments/kubedns.yaml
 ....
 
 .Verification
 ....
-kubectl --namespace=kube-system get pods
+ssh root@$BASTION kubectl --namespace=kube-system get pods
 ....
 
 ....
@@ -1168,7 +1232,7 @@ Perform a quick smoke test to demonstrate that this cluster is working
 === Test
 
 ....
-kubectl run nginx --image=nginx --port=80 --replicas=3
+ssh root@$BASTION kubectl run nginx --image=nginx --port=80 --replicas=3
 ....
 
 ....
@@ -1176,7 +1240,7 @@ deployment "nginx" created
 ....
 
 ....
-kubectl get pods -o wide
+ssh root@$BASTION kubectl get pods -o wide
 ....
 
 ....
@@ -1187,27 +1251,23 @@ nginx-2032906785-u8rzc   1/1       Running   0          21s       10.200.0.2   w
 ....
 
 ....
-kubectl expose deployment nginx --type NodePort
+ssh root@$BASTION kubectl expose deployment nginx --type NodePort
 ....
 
 ....
 service "nginx" exposed
 ....
 
-.Grab the `NodePort` that was setup for the nginx service.
+.Grab a worker IP address and the `NodePort` that was setup for the nginx service.
 ....
-NODE_PORT=$(kubectl get svc nginx --output=jsonpath='{range .spec.ports[0]}{.nodePort}')
+WORKER=$(triton ip worker0)
+NODE_PORT=$(ssh root@$BASTION kubectl get svc nginx "--output=jsonpath='{range .spec.ports[0]}{.nodePort}'")
 ....
 
-.Grab the ip for one of the worker nodes
-....
-BASTION=$(triton ip kubernetes)
-IP=$(triton ip worker0)
-....
 
 .Test the nginx service using cURL from the Bastion host
 ....
-ssh root@$BASTION curl http://${IP}:${NODE_PORT}
+ssh root@$BASTION curl http://${WORKER}:${NODE_PORT}
 ....
 
 ....
