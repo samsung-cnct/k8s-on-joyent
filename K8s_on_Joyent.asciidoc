@@ -286,6 +286,7 @@ cat > kubernetes-csr.json <<EOF
   "CN": "kubernetes",
   "hosts": [
     "kubernetes",
+    "10.32.0.1",
     ${IPS}
     "127.0.0.1"
   ],
@@ -549,7 +550,7 @@ IP=$(triton ip $NODENAME)
 .Download and install the Kubernetes controller binaries
 ....
 proxyssh root@$IP <<< "
-wget --no-verbose -P /usr/local/bin/ https://storage.googleapis.com/kubernetes-release/release/v1.5.2/bin/linux/amd64/{kube-apiserver,kube-controller-manager,kube-scheduler,kubectl}
+wget --no-verbose -P /usr/local/bin/ https://storage.googleapis.com/kubernetes-release/release/v1.5.6/bin/linux/amd64/{kube-apiserver,kube-controller-manager,kube-scheduler,kubectl}
 chmod +x /usr/local/bin/{kube-apiserver,kube-controller-manager,kube-scheduler,kubectl}
 "
 ....
@@ -699,7 +700,7 @@ ExecStart=/usr/local/bin/kube-controller-manager \
   --master=http://$IP:8080 \
   --root-ca-file=/var/lib/kubernetes/ca.pem \
   --service-account-private-key-file=/var/lib/kubernetes/kubernetes-key.pem \
-  --service-cluster-ip-range=10.32.0.0/24 \
+  --service-cluster-ip-range=10.32.0.0/16 \
   --v=2
 Restart=on-failure
 RestartSec=5
@@ -892,7 +893,7 @@ tar -xvf cni-07a8a28637e97b22eb8dfe710eeae1344f69d16e.tar.gz -C /opt/cni
 
 ....
 proxyssh root@$IP <<< "
-wget --no-verbose -P /usr/bin https://storage.googleapis.com/kubernetes-release/release/v1.5.2/bin/linux/amd64/{kubectl,kube-proxy,kubelet}
+wget --no-verbose -P /usr/bin https://storage.googleapis.com/kubernetes-release/release/v1.5.6/bin/linux/amd64/{kubectl,kube-proxy,kubelet}
 chmod +x /usr/bin/{kubectl,kube-proxy,kubelet}
 "
 ....
@@ -938,7 +939,6 @@ Requires=docker.service
 ExecStart=/usr/bin/kubelet \
   --allow-privileged=true \
   --api-servers=${API_SERVERS} \
-  --cloud-provider= \
   --cluster-dns=10.32.0.10 \
   --cluster-domain=cluster.local \
   --container-runtime=docker \
@@ -982,6 +982,7 @@ Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
 [Service]
 ExecStart=/usr/bin/kube-proxy \
+  --masquerade-all \
   --master=${CONTROLLER0} \
   --kubeconfig=/var/lib/kubelet/kubeconfig \
   --proxy-mode=iptables \
@@ -1021,7 +1022,7 @@ access our cluster from outside.
 .Install kubectl
 ....
 ssh root@$BASTION <<< "
-wget --no-verbose -P /usr/local/bin/ https://storage.googleapis.com/kubernetes-release/release/v1.5.2/bin/linux/amd64/kubectl
+wget --no-verbose -P /usr/local/bin/ https://storage.googleapis.com/kubernetes-release/release/v1.5.6/bin/linux/amd64/kubectl
 chmod +x /usr/local/bin/kubectl
 "
 ....
