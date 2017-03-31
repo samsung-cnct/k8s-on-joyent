@@ -273,7 +273,7 @@ This is being done for ease of use. In production you should generate
 individual TLS certificates for each component type. All replicas of a given 
 component type must share the same certificate.
 
-.Set the Kubernetes Public Address:
+.Set the Kubernetes "Public" Address:
 ....
 IPS=$(triton instance ls -o ips | grep -v IPS | tr '\n' ',' | tr -d '[]')
 ....
