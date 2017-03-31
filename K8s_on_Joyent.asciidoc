@@ -126,7 +126,7 @@ proxyssh() {
 
 Ubuntu normally prevents you from logging in as root. For the sake of brevity in this document, override this behavior.
 
-.Allow root login to certified image
+.Allow root login to certified image:
 ....
 ssh ubuntu@$BASTION sudo cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
 for d in controller{0,1,2} worker{0,1,2}; do
@@ -137,8 +137,7 @@ done
 
 NOTE: This is not something you should normally do. This is to simplify this document only.
 
-
-You should now have the following compute instances.
+You should now have the following compute instances:
 
 ....
 triton instances
@@ -209,7 +208,7 @@ chmod +x /usr/local/bin/cfssljson
 [[setting-up-a-certificate-authority]]
 === Setting up a Certificate Authority
 
-.Create the CA configuration file
+.Create the CA configuration file:
 ....
 echo '{
   "signing": {
@@ -229,7 +228,7 @@ echo '{
 [[generate-the-ca-certificate-and-private-key]]
 === Generate the CA certificate and private key
 
-.Create the CA CSR
+.Create the CA CSR:
 ....
 echo '{
   "CN": "Kubernetes",
@@ -249,19 +248,19 @@ echo '{
 }' > ca-csr.json
 ....
 
-.Generate the CA certificate and private key
+.Generate the CA certificate and private key:
 ....
 cfssl gencert -initca ca-csr.json | cfssljson -bare ca
 ....
 
-.Results
+.Results:
 ....
 ca-key.pem
 ca.csr
 ca.pem
 ....
 
-.Verification
+.Verification:
 ....
 openssl x509 -in ca.pem -text -noout
 ....
@@ -274,7 +273,7 @@ This is being done for ease of use. In production you should generate
 individual TLS certificates for each component type. All replicas of a given 
 component type must share the same certificate.
 
-.Set the Kubernetes "Public" Address
+.Set the Kubernetes Public Address:
 ....
 IPS=$(triton instance ls -o ips | grep -v IPS | tr '\n' ',' | tr -d '[]')
 ....
@@ -307,7 +306,7 @@ cat > kubernetes-csr.json <<EOF
 EOF
 ....
 
-.Generate the Kubernetes certificate and private key
+.Generate the Kubernetes certificate and private key:
 ....
 cfssl gencert \
   -ca=ca.pem \
@@ -317,14 +316,14 @@ cfssl gencert \
   kubernetes-csr.json | cfssljson -bare kubernetes
 ....
 
-.Results
+.Results:
 ....
 kubernetes-key.pem
 kubernetes.csr
 kubernetes.pem
 ....
 
-.Verification
+.Verification:
 ....
 openssl x509 -in kubernetes.pem -text -noout
 ....
@@ -332,7 +331,7 @@ openssl x509 -in kubernetes.pem -text -noout
 [[copy-tls-certs]]
 === Copy TLS Certs
 
-.Copy the TLS certificates and keys to each Kubernetes host
+.Copy the TLS certificates and keys to each Kubernetes host:
 ....
 # Collect a list of all the ips
 IPS=$(triton instance ls -o ips | grep -v IPS | tr '\n' ',' | tr -d '[]')
@@ -361,10 +360,10 @@ Bootstrap a 3 node etcd cluster. The following virtual machines will be used:
 [[etcd-why]]
 === Why
 
-All Kubernetes components are stateless which greatly simplifies
+All Kubernetes components are stateless, which greatly simplifies
 managing a Kubernetes cluster. All state is stored in etcd, which is a
 database and must be treated specially. To limit the number of compute
-resource to complete this lab etcd is being installed on the Kubernetes
+resource to complete this lab, etcd is being installed on the Kubernetes
 controller nodes. In production environments etcd should be run on a
 dedicated set of machines for the following reasons:
 
@@ -394,7 +393,7 @@ CA will be able to access the etcd cluster.
 [[download-and-install-the-etcd-binaries]]
 ==== Download and Install the etcd binaries
 
-.Download the official etcd release binaries from `coreos/etcd` GitHub project
+.Download the official etcd release binaries from `coreos/etcd` GitHub project:
 ....
 # Set NODENAME for each controller node in turn as your repeat this section
 NODENAME=controller0
@@ -404,7 +403,7 @@ IP=$(triton ip ${NODENAME})
 proxyssh root@$IP wget --no-verbose https://github.com/coreos/etcd/releases/download/v3.0.10/etcd-v3.0.10-linux-amd64.tar.gz
 ....
 
-.Extract and install the `etcd` server binary and the `etcdctl` command line client
+.Extract and install the `etcd` server binary and the `etcdctl` command line client:
 ....
 proxyssh root@$IP <<< '
 tar -xvf etcd-v3.0.10-linux-amd64.tar.gz
@@ -418,7 +417,7 @@ All etcd data is stored under the etcd data directory.
 .Best Practice
 NOTE: In production the etcd data directory should be backed by a persistent disk.
 
-.Copy the TLS certificates to the etcd configuration directory
+.Copy the TLS certificates to the etcd configuration directory:
 ....
 proxyssh root@$IP <<< '
 mkdir -p /var/lib/etcd /etc/etcd/
@@ -431,7 +430,7 @@ and communicate with other etcd peers.
 
 NOTE: Each etcd member must have a unique name within an etcd cluster
 
-.Set the controller addresses
+.Set the controller addresses:
 ....
 # Retrieve all the names and addresses from triton,
 # filter for just the controllers, then build URLs
@@ -443,7 +442,7 @@ INITIAL_CLUSTER=$(triton instance ls -o name,ips |
 
 The etcd server will be started and managed by systemd. 
 
-.Create the etcd systemd service file
+.Create the etcd systemd service file:
 ....
 proxyssh root@$IP cp /dev/stdin /etc/systemd/system/etcd.service <<< "[Unit]
 Description=etcd
@@ -473,7 +472,7 @@ WantedBy=multi-user.target
 "
 ....
 
-.Enable and start etcd
+.Enable and start etcd:
 ....
 proxyssh root@$IP <<< "
 systemctl daemon-reload
@@ -482,7 +481,7 @@ systemctl start etcd
 "
 ....
 
-.Verification
+.Verification:
 ....
 proxyssh root@$IP systemctl status etcd --no-pager
 ....
@@ -492,7 +491,7 @@ NOTE: Remember to repeat these steps for `controller1`, and `controller2`
 ==== Verification
 
 Once all 3 etcd nodes have been bootstrapped verify the etcd cluster is
-healthy, on one of the controller nodes run:
+healthy; on one of the controller nodes run:
 
 .Request etcd cluster health
 ....
@@ -529,11 +528,11 @@ Each component is being run on the same machines for the following
 reasons:
 
 * The Scheduler and Controller Manager are tightly coupled with the API
-Server
+Server.
 * Only one Scheduler and Controller Manager can be active at a given
 time, but it's ok to run multiple at the same time. Each component will
 elect a leader via the API Server.
-* Running multiple copies of each component is required for H/A
+* Running multiple copies of each component is required for H/A.
 * Running each component next to the API Server eases configuration.
 
 [[provision-the-kubernetes-controller-cluster]]
@@ -566,7 +565,7 @@ Kubernetes API server and Kubernetes clients such as `kubectl` and the
 `kubelet` agent. The TLS certificates will also be used to authenticate
 the Kubernetes API server to etcd via TLC client auth.
 
-.Copy the TLS certificates to the Kubernetes configuration directory
+.Copy the TLS certificates to the Kubernetes configuration directory:
 ....
 proxyssh root@$IP <<< "
 mkdir -p /var/lib/kubernetes
@@ -593,7 +592,7 @@ which does not require authentication. The insecure port is only enabled
 for local access.
 
 [[common-token]]
-.Create a the common token to be used throughout the rest of this tutorial
+.Create a the common token to be used throughout the rest of this tutorial:
 ....
 COMMON_TOKEN=${COMMON_TOKEN:=$(head /dev/urandom | base32 | head -c 8)}
 echo "Your common token is: ${COMMON_TOKEN}"
@@ -630,7 +629,7 @@ proxyssh root@$IP cp /dev/stdin /var/lib/kubernetes/authorization-policy.jsonl <
 [[kubernetes-api-server]]
 === Kubernetes API Server
 
-.Create the systemd service file
+.Create the systemd service file:
 ....
 ETCD_CLIENT_ACCESS=$(triton instance ls -o name,ips | awk '/controller/{gsub(/[^0-9.]/,"",$2);print "https://" $2":2379"}' | tr '\n' ',')
 
@@ -668,7 +667,7 @@ WantedBy=multi-user.target
 "
 ....
 
-.Enable and start api server
+.Enable and start API server:
 ....
 proxyssh root@$IP <<< "
 systemctl daemon-reload
@@ -677,7 +676,7 @@ systemctl start kube-apiserver
 "
 ....
 
-.Verification
+.Verification:
 ....
 proxyssh root@$IP systemctl status kube-apiserver --no-pager
 ....
@@ -710,7 +709,7 @@ WantedBy=multi-user.target
 "
 ....
 
-.Enable and start controller manager
+.Enable and start controller manager:
 ....
 proxyssh root@$IP <<< "
 systemctl daemon-reload
@@ -719,7 +718,7 @@ systemctl start kube-controller-manager
 "
 ....
 
-.Verification
+.Verification:
 ....
 proxyssh root@$IP systemctl status kube-controller-manager --no-pager
 ....
@@ -780,7 +779,6 @@ etcd-2               Healthy   {"health": "true"}
 
 [[setup-kubernetes-api-server-frontend-load-balancer]]
 === Setup Kubernetes API Server Frontend Load Balancer
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Setting up a load balancer is out of the scope of this tutorial. A frontend 
 load balancer, like haproxy, will need to be set up on bastion in order to 
@@ -865,7 +863,7 @@ RestartSec=5
 WantedBy=multi-user.target"
 ....
 
-.Enable and start docker
+.Enable and start docker:
 ....
 proxyssh root@$IP <<< "
 systemctl daemon-reload
@@ -874,7 +872,7 @@ systemctl start docker
 "
 ....
 
-.Verification (this may take a moment for docker to be listening after being started)
+.Verification (this may take a moment for docker to be listening after being started):
 ....
 proxyssh root@$IP docker version
 ....
@@ -882,7 +880,7 @@ proxyssh root@$IP docker version
 [[kubelet]]
 === kubelet
 
-.Download and install CNI plugins
+.Download and install CNI plugins:
 ....
 mkdir -p /opt/cni
 wget --no-verbose https://storage.googleapis.com/kubernetes-release/network-plugins/cni-07a8a28637e97b22eb8dfe710eeae1344f69d16e.tar.gz
@@ -898,7 +896,7 @@ chmod +x /usr/bin/{kubectl,kube-proxy,kubelet}
 "
 ....
 
-Set `COMMON_TOKEN` to the value you saved in xref:common-token[Authentication]
+Set `COMMON_TOKEN` to the value you saved in xref:common-token[Authentication].
 
 ==== Configure kubelet:
 ....
@@ -926,7 +924,7 @@ users:
     token: $COMMON_TOKEN"
 ....
 
-.Create the kubelet systemd service file
+.Create the kubelet systemd service file:
 ....
 proxyssh root@$IP cp /dev/stdin /etc/systemd/system/kubelet.service <<< \
 "[Unit]
@@ -973,7 +971,7 @@ proxyssh root@$IP systemctl status kubelet --no-pager
 [[kube-proxy]]
 === kube-proxy
 
-.Create the kube-proxy service file
+.Create the kube-proxy service file:
 ....
 proxyssh root@$IP cp /dev/stdin /etc/systemd/system/kube-proxy.service <<< \
 "[Unit]
@@ -995,7 +993,7 @@ RestartSec=5
 WantedBy=multi-user.target"
 ....
 
-.Enable and start kube-proxy
+.Enable and start kube-proxy:
 ....
 proxyssh root@$IP <<< "
 systemctl daemon-reload
@@ -1004,7 +1002,7 @@ systemctl start kube-proxy
 "
 ....
 
-.Verification
+.Verification:
 ....
 proxyssh root@$IP systemctl status kube-proxy --no-pager
 ....
@@ -1044,7 +1042,7 @@ Since we are using self-signed TLS certs we need to trust the CA certificate so 
 
 The CA certificate has been copied to the bastion in an earlier step.
 
-.Build up the kubeconfig entry
+.Build up the kubeconfig entry:
 ....
 ssh root@$BASTION <<< "
 kubectl config set-cluster kubernetes-the-hard-way \
@@ -1198,7 +1196,7 @@ the DNS add-on the following things will not work:
 ssh root@$BASTION kubectl create -f https://raw.githubusercontent.com/kelseyhightower/kubernetes-the-hard-way/master/services/kubedns.yaml
 ....
 
-.Verification
+.Verification:
 ....
 ssh root@$BASTION kubectl --namespace=kube-system get svc
 ....
@@ -1227,7 +1225,7 @@ kube-dns-v19-965658604-zwl3g   3/3       Running   0          49s
 [[smoke-test]]
 == Smoke Test
 
-Perform a quick smoke test to demonstrate that this cluster is working
+Perform a quick smoke test to demonstrate that this cluster is working.
 
 [[test]]
 === Test
@@ -1259,7 +1257,7 @@ ssh root@$BASTION kubectl expose deployment nginx --type NodePort
 service "nginx" exposed
 ....
 
-.Grab a worker IP address and the `NodePort` that was setup for the nginx service.
+.Grab a worker IP address and the `NodePort` that was setup for the nginx service:
 ....
 WORKER=$(triton ip worker0)
 NODE_PORT=$(ssh root@$BASTION kubectl get svc nginx "--output=jsonpath='{range .spec.ports[0]}{.nodePort}'")
